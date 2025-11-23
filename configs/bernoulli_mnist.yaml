@@ -1,0 +1,24 @@
+model:
+  class_path: src.models.jsa.JSA
+  init_args:
+    joint_model:
+      _target_: src.models.components.joint_model.JointModel
+      hidden_dim: 256
+      num_layers: 2
+    proposal_model:
+      _target_: src.models.components.proposal_model.ProposalModel
+      hidden_dim: 256
+      num_layers: 2
+      h_dim: 200
+    sampler:
+      _target_: src.samplers.mis_sampler.MISampler
+      use_cache: true
+      dataset_size: 60000
+    lr: 1e-3
+    num_mis_steps: 3
+
+data:
+  class_path: src.data.mnist.MNISTDataModule
+  init_args:
+    root: ./data
+    batch_size: 64

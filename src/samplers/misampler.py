@@ -1,4 +1,4 @@
-# src/samplers/mis_sampler.py
+# src/samplers/misampler.py
 import torch
 from src.base.base_sampler import BaseSampler
 

@@ -2,12 +2,12 @@
 
 import torch
 import torch.nn as nn
+from src.base.base_jsa_modules import BaseJointModel
 
-class JointModel(nn.Module):
+class JointModel(BaseJointModel):
     """
     p_theta(x, h), must implement:
         - log_joint_prob(x, h)
-        - sample_prior(batch_size)
     """
     def __init__(self, hidden_dim=256, num_layers=2):
         super().__init__()

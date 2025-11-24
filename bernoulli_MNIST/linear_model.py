@@ -138,8 +138,8 @@ class Model(nn.Module):
 
     def jsa_loss_cache(self, x, n_samples, index, caches):
         # get loss for JSA with cache
-        x_single = x
-        x = repeat(x, n_samples)
+        x_single = x # [B, D]
+        x = repeat(x, n_samples) # [B*n_samples, D]
         cache_lists = []
         for j in range(len(self.layers)):
             cache_temp = [caches[i][j] for i in index]
@@ -155,7 +155,7 @@ class Model(nn.Module):
         log_p_cache = log_p_cache.view(-1, 1)
         log_p = torch.cat([log_p_cache, log_p], 1).view(-1)
 
-        logw = (log_p - log_q).detach().cpu().numpy()
+        logw = (log_p - log_q).detach().cpu().numpy() # [B*(n_samples+1)]
 
         ind = np.arange(0, len(logw)).reshape(-1, n_samples + 1)
         logw = logw.reshape(-1, n_samples + 1)

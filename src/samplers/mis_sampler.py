@@ -6,10 +6,10 @@ from src.base.base_sampler import BaseSampler
 class MISampler(BaseSampler):
     def __init__(
         self,
-        joint_model,
-        proposal_model,
-        use_cache=True,
-        dataset_size=None,
+        joint_model,  # p(x, h)
+        proposal_model,  # q(h|x)
+        use_cache=True,  # whether to use cache mechanism
+        dataset_size=None,  # required if use_cache is True
         device="cpu",
     ):
         self.joint_model = joint_model
@@ -19,54 +19,184 @@ class MISampler(BaseSampler):
 
         if use_cache:
             assert dataset_size is not None
-            self.cache = [None for _ in range(dataset_size)]
+            self._init_cache(dataset_size, proposal_model.latent_dim)
 
     @torch.no_grad()
-    def step(self, x, h_old=None, idx=None):
-        """
-        Perform single MIS step:
-            propose h'
-            compute acceptance probability
-            accept/reject
-        """
-        # propose from q_phi(h|x)
-        h_new = self.proposal_model.sample_latent(x)
+    def _init_cache(self, dataset_size, latent_dim):
+        """Initialize cache by sampling from proposal model
 
-        if h_old is None:
+        You may modify this method to change the initialization strategy.
+        """
+        self.cache = torch.full(
+            (dataset_size, latent_dim), float("nan"), device=self.device
+        )
+
+    @torch.no_grad()
+    def _init_h_old(self, idx, h_new):
+        if self.use_cache and idx is not None:
+            h_old = self.cache[idx].to(self.device)
+            nan_mask = torch.isnan(h_old)
+            if nan_mask.any():
+                h_old[nan_mask] = h_new[nan_mask].clone()
+        else:
             h_old = h_new.clone()
+        return h_old
 
+    @torch.no_grad()
+    def _cal_acceptance_prob(self, x, h_new, h_old):
+        """
+        Calculate acceptance probability for MIS step
+        a = p(x,h') * q(h|x) / (p(x,h) * q(h'|x))
+        """
         log_p_new = self.joint_model.log_joint_prob(x, h_new)
         log_p_old = self.joint_model.log_joint_prob(x, h_old)
 
         log_q_new = self.proposal_model.log_conditional_prob(h_new, x)
         log_q_old = self.proposal_model.log_conditional_prob(h_old, x)
 
+        # Check for NaN or Inf
+        if (
+            torch.isnan(log_p_new).any()
+            or torch.isnan(log_p_old).any()
+            or torch.isnan(log_q_new).any()
+            or torch.isnan(log_q_old).any()
+        ):
+            raise ValueError(
+                "NaN encountered in log probabilities during acceptance probability calculation."
+            )
+        if (
+            torch.isinf(log_p_new).any()
+            or torch.isinf(log_p_old).any()
+            or torch.isinf(log_q_new).any()
+            or torch.isinf(log_q_old).any()
+        ):
+            raise ValueError(
+                "Infinity encountered in log probabilities during acceptance probability calculation."
+            )
+
         log_accept = (log_p_new + log_q_old) - (log_p_old + log_q_new)
-        accept_prob = torch.exp(torch.clamp(log_accept, max=0.0))
+        accept_prob = torch.exp(torch.clamp(log_accept, max=0.0, min=-100.0))
+        return accept_prob
+
+    @torch.no_grad()
+    def step(self, x, idx=None, h_old=None):
+        """
+        Perform single MIS step:
+            propose h'
+            compute acceptance probability
+            accept/reject
+        """
+
+        # x: [batch_size, ...]
+        # h_old: [batch_size, latent_dim]
+        # idx: [batch_size, ]
+
+        # Get h_old from cache if using cache
+        if h_old is None:
+            # If there is no h_old provided, initialize from cache or proposal model
+            h_old = self._init_h_old(idx, self.proposal_model.sample_latent(x))
+            
+        # Propose from q_phi(h|x)
+        h_new = self.proposal_model.sample_latent(x)  # [batch_size, latent_dim]
+
+        # Compute acceptance probability
+        accept_prob = self._cal_acceptance_prob(x, h_new, h_old)
 
         u = torch.rand_like(accept_prob)
-        accept = (u < accept_prob).float().unsqueeze(-1)
+        accept = (u < accept_prob).float().unsqueeze(-1)  # [batch_size, 1]
 
+        # Update sample
         h_next = accept * h_new + (1 - accept) * h_old
 
         # update cache
         if self.use_cache and idx is not None:
-            self.cache[idx] = h_next.detach().cpu()
+            self.cache[idx] = h_next.detach()
 
         return h_next
 
     @torch.no_grad()
-    def sample(self, x, h_init=None, idx=None, num_steps=1):
-        h = h_init
-        for _ in range(num_steps):
-            h = self.step(x, h_old=h, idx=idx)
-        return h
+    def sample(self, x, idx=None, num_steps=1, parallel=False):
+        """Generate samples using MIS sampler.
+
+
+        Sequential multi-step sampling for MIS.
+
+        """
+
+        # if not self.use_cache and num_steps > 1:
+        #     raise ValueError(
+        #         "Multi-step sampling (num_steps > 1) is not meaningful when use_cache=False."
+        #     )
+
+        if parallel:
+            return self._sample_parallel(x, idx=idx, num_steps=num_steps)
+        else:
+            h_old = None
+            for _ in range(num_steps):
+                h_old = self.step(x, idx=idx, h_old=h_old)
+
+        return h_old
+
+    @torch.no_grad()
+    def _sample_parallel(self, x, idx=None, num_steps=1):
+        """Parallelized multi-step sampling for MIS. Generativetes all proposal samples in parallel.
+
+        Args:
+            x: Input data, shape [batch_size, ...].
+            idx: Indices for cache, shape [batch_size].
+            num_steps: Number of sampling steps.
+        Returns:
+            h_final: Final sampled latent variables, shape [batch_size, latent_dim].
+        """
+
+        # Check if multi-step sampling is meaningful
+        if not self.use_cache and num_steps > 1:
+            raise ValueError(
+                "Multi-step sampling (num_steps > 1) is not meaningful when use_cache=False."
+            )
+
+        # Initialize h_old from cache or proposal model
+        h_old = self._init_h_old(idx, self.proposal_model.sample_latent(x))
+
+        # Generate all proposal samples in parallel
+        h_new = self.proposal_model.sample_latent(
+            x.unsqueeze(0).expand(num_steps, -1, -1)
+        )  # [num_steps, batch_size, latent_dim]
+
+        # Sequentially compute acceptance probabilities and update samples
+        for t in range(num_steps):
+            # Get the t-th proposal sample
+            h_new_t = h_new[t]  # [batch_size, latent_dim]
+
+            # Compute acceptance probability
+            accept_prob = self._cal_acceptance_prob(x, h_new_t, h_old)
+
+            # Accept/reject step
+            u = torch.rand_like(accept_prob)
+            accept = (u < accept_prob).float().unsqueeze(-1)  # [batch_size, 1]
+
+            # Update samples
+            h_old = accept * h_new_t + (1 - accept) * h_old
+
+        # Update cache
+        if self.use_cache and idx is not None:
+            self.cache[idx] = h_old.detach()
+
+        return h_old
 
     def state_dict(self):
         if not self.use_cache:
             return {}
-        return {"cache": self.cache}
+        return {
+            "cache": self.cache.cpu(),
+        }  # Save cache as tensor
 
     def load_state_dict(self, state):
         if "cache" in state:
-            self.cache = state["cache"]
+            self.cache = state["cache"].to(self.device)
+
+
+if __name__ == "__main__":
+
+    # Test code need to be after the joint model and proposal model are implemented
+    pass

@@ -1,24 +1,70 @@
+seed_everything: 42
+
 model:
   class_path: src.models.jsa.JSA
   init_args:
     joint_model:
       _target_: src.models.components.joint_model.JointModel
-      hidden_dim: 256
-      num_layers: 2
+      latent_dim: 200
+      layers: [200, 200, 200]
+      output_dim: 784
+      activation: relu
     proposal_model:
       _target_: src.models.components.proposal_model.ProposalModel
-      hidden_dim: 256
-      num_layers: 2
-      h_dim: 200
+      input_dim: 784
+      latent_dim: 200
+      layers: [200, 200, 200]
+      activation: relu
     sampler:
-      _target_: src.samplers.mis_sampler.MISampler
+      _target_: src.samplers.misampler.MISampler
       use_cache: true
       dataset_size: 60000
-    lr: 1e-3
+    lr_joint: 1e-3
+    lr_proposal: 1e-3
     num_mis_steps: 3
 
 data:
-  class_path: src.data.mnist.MNISTDataModule
+  class_path: src.data.binary_mnist.BinaryMNISTDataModule
   init_args:
     root: ./data
-    batch_size: 64
+    batch_size: 128
+    num_workers: 4
+
+trainer:
+  logger:
+    class_path: lightning.pytorch.loggers.tensorboard.TensorBoardLogger
+    init_args:
+      save_dir: ./egs/bernoulli_mnist
+      name: binary_mnist
+
+  callbacks:
+    # - class_path: src.utils.redirect_callback.RedirectStdCallback
+    #   init_args:
+    #     filename: training.log
+    - class_path: src.utils.redirect_print_callback.RedirectPrintCallback
+      init_args:
+        filename: training.log
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: valid/nll
+        mode: min
+        save_top_k: 1
+        filename: best-checkpoint
+    - class_path: lightning.pytorch.callbacks.EarlyStopping
+      init_args:
+        monitor: valid/nll
+        mode: min
+        patience: 10
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelSummary
+      init_args:
+        max_depth: 2
+
+  max_epochs: 100
+  accelerator: auto
+  devices: [2]
+  enable_progress_bar: true
+  log_every_n_steps: 50
+  # log_every_n_epochs: 1

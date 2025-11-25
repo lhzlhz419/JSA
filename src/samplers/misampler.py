@@ -10,17 +10,24 @@ class MISampler(BaseSampler):
         proposal_model,  # q(h|x)
         use_cache=True,  # whether to use cache mechanism
         dataset_size=None,  # required if use_cache is True
-        device="cpu",
     ):
         self.joint_model = joint_model
         self.proposal_model = proposal_model
         self.use_cache = use_cache
-        self.device = device
+        
+        # Acquire device from joint_model parameters
+        self.device = next(joint_model.parameters()).device
 
         if use_cache:
             assert dataset_size is not None
             self._init_cache(dataset_size, proposal_model.latent_dim)
 
+    def to(self, device):
+        if hasattr(self, "cache") and self.cache is not None:
+            self.cache = self.cache.to(device)
+        self.device = device
+        return self
+    
     @torch.no_grad()
     def _init_cache(self, dataset_size, latent_dim):
         """Initialize cache by sampling from proposal model

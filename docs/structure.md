@@ -45,7 +45,7 @@
 │   │   │   ├── ...                
 │   │   └── ...                    
 │   ├── samplers/                  # 采样器定义
-│   │   ├── mis_sampler.py         # MIS 采样器实现
+│   │   ├── misampler.py         # MIS 采样器实现
 │   │   └── ...                    
 │   └── utils/                     # 工具函数
 ├── scripts/                       # 运行脚本
@@ -388,7 +388,7 @@ model:
                 num_layers: 4
 
             sampler:
-                _target_: src.samplers.mis_sampler.MISampler
+                _target_: src.samplers.misampler.MISampler
                 dataset_size: 60000
                 use_cache: true
 

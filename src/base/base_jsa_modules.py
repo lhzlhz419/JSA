@@ -6,7 +6,9 @@ from torch.nn import Module
 class BaseProposalModel(Module, ABC):
     @abstractmethod
     def sample_latent(self, x):
-        """Sample latent variable h given input x"""
+        """Sample latent variable h given input x.
+        
+        h ~ q(h|x)"""
         pass
 
     @abstractmethod

@@ -18,4 +18,11 @@ Codes for reproducing experiments  in “Zhijian Ou, Yunfu Song. Joint Stochasti
 
 The categorical MNIST experiments are based on the implementation [ARSM](https://github.com/ARM-gradient/ARSM).
 
+```bash
+PYTHONPATH=. python scripts/run_bernoulli_MNIST.py fit --config ./configs/bernoulli_mnist.yaml
+
+```
  
+``` bash
+tensorboard --logdir=./egs/bernoulli_mnist/binary_mnist/version_4 --port=6034
+```

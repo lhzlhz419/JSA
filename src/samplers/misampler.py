@@ -13,7 +13,7 @@ class MISampler(BaseSampler):
     ):
         self.joint_model = joint_model
         self.proposal_model = proposal_model
-        self.use_cache = use_cache
+        self._use_cache = use_cache
         
         # Acquire device from joint_model parameters
         self.device = next(joint_model.parameters()).device
@@ -27,6 +27,15 @@ class MISampler(BaseSampler):
             self.cache = self.cache.to(device)
         self.device = device
         return self
+    
+    @property
+    def use_cache(self):
+        return self._use_cache
+    
+    @use_cache.setter
+    def use_cache(self, value):
+        self._use_cache = value
+   
     
     @torch.no_grad()
     def _init_cache(self, dataset_size, latent_dim):

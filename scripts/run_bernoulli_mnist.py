@@ -5,7 +5,9 @@ from src.data.mnist import MNISTDataModule
 from hydra.utils import instantiate
 import logging
 
-
+from dotenv import load_dotenv
+import os
+load_dotenv()
 
 
 def main():

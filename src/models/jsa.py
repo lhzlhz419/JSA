@@ -43,8 +43,8 @@ class JSA(LightningModule):
             idx = idx.tolist()
             h = self.sampler.sample(x, idx=idx, num_steps=self.num_mis_steps)
         else:  # use proposal model directly
-            h = self.proposal_model.sample_latent(x, num_samples=1)
-            h = h.squeeze(1)
+            h = self.proposal_model.sample_latent(x, num_samples=1) # [B, latent_dim, 1]
+            h = h.squeeze()
         x_hat = self.joint_model.sample(h=h)
         return x_hat
 

@@ -11,7 +11,7 @@ model:
       activation: leakyrelu
       final_activation: tanh
     proposal_model:
-      _target_: src.models.components.proposal_model.ProposalModel
+      _target_: src.models.components.proposal_model.ProposalModelBernoulli
       input_dim: 784
       latent_dim: 200
       layers: [200, 200]
@@ -37,8 +37,8 @@ trainer:
   logger:
     class_path: lightning.pytorch.loggers.tensorboard.TensorBoardLogger
     init_args:
-      save_dir: ./egs/bernoulli_mnist
-      name: continuous_mnist
+      save_dir: ./egs/continuous_mnist
+      name: bernoulli_prior
 
   callbacks:
     

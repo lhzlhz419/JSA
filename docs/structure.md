@@ -14,15 +14,15 @@
 
 上面的都放在不同的文件夹中，例如 `models`，`data` 等。
 
-实验的结果保存在 `egs` 文件夹中，每个实验一个子文件夹，例如 `bernoulli_MNIST`，`categorical_MNIST` 等。
+实验的结果保存在 `egs` 文件夹中，每个数据集一个子文件夹，例如 `binary_mnist`，`continuous_mnist` 等。子目录下再根据不同的实验配置，保存不同的版本。
 
 ## 目录结构
 
 ```text
 .
 ├── configs/                       # 配置文件夹
-│   ├── bernoulli_prior_binary_mnist.yaml       # Bernoulli MNIST 实验配置文件
-│   ├── categorical_MNIST.yaml     # Categorical MNIST 实验配置文件
+│   ├── bernoulli_prior_binary_mnist.yaml           # Bernoulli MNIST 实验配置文件
+│   ├── categorical_prior_continuous_mnist.yaml     # Categorical MNIST 实验配置文件
 │   └── ...                        
 ├── data/                          # 数据相关存储文件夹
 │   ├── gaussian_2d/               # 二维高斯数据集
@@ -49,15 +49,15 @@
 │   │   └── ...                    
 │   └── utils/                     # 工具函数
 ├── scripts/                       # 运行脚本
-│   ├── run_bernoulli_MNIST.py     # 运行 Bernoulli MNIST 实验脚本
+│   ├── run_mnist.py     # 运行 Bernoulli MNIST 实验脚本
 │   ├── run_categorical_MNIST.py   # 运行 Categorical MNIST 实验脚本
 │   └── ...                        
 ├── docs/                          # 文档文件夹
 │   ├── structure.md               # 结构说明
 │   └── ...                        
 ├── egs/                           # 实验结果
-│   ├── bernoulli_MNIST/           # Bernoulli MNIST 实验
-│   ├── categorical_MNIST/         # Categorical MNIST 实验
+│   ├── binary_mnist/              # Binary MNIST 实验
+│   ├── continuous_mnist/          # Continuous MNIST 实验
 │   └── ...                        
 ├── README.md                      # 项目说明
 └── ...
@@ -329,10 +329,6 @@ class JSA(LightningModule):
         pass
 ```
 
-### `train.py` 脚本
-
-最后，我们需要一个训练脚本 `train.py`，用于运行实验。
-
 使用 `LightningCLI` 来简化训练过程。由于我们的 `JSA` 类中存在 `joint_model` 和 `proposal_model`，以及 `MISampler`，而后者的初始化需要调用前两个模型，因此我们需要使用 `hydra.utils.instantiate` 来实例化这些组件。
 
 ```python
@@ -343,24 +339,36 @@ from src.data.mnist import MNISTDataset, JsaDataModule
 from hydra.utils import instantiate
 
 class JSA(LightningModule):
-    def __init__(self, cfg: ArgsType):
-        # Instantiate generative model and inference model
-        joint_model = instantiate(cfg.joint_model)
-        proposal_model = instantiate(cfg.proposal_model)
-        
-        # Instantiate sampler with the models
-        sampler = instantiate(
-            cfg.sampler,
-            joint_model=joint_model,
-            proposal_model=proposal_model,
-            dataset_size=cfg.dataset_size
+    def __init__(
+        self,
+        joint_model,
+        proposal_model,
+        sampler,
+        lr_joint=1e-3,
+        lr_proposal=1e-3,
+        num_mis_steps=3,
+        cache_start_epoch=0,
+    ):
+        super().__init__()
+        self.joint_model: BaseJointModel = instantiate(joint_model)
+        self.proposal_model: BaseProposalModel = instantiate(proposal_model)
+        self.sampler: MISampler = instantiate(
+            sampler,
+            joint_model=self.joint_model,
+            proposal_model=self.proposal_model,
         )
-        
-        self.save_hyperparameters(cfg)
+```
+
+### `run_dataset.py` 脚本
+
+最后，我们需要一个训练脚本 `run_dataset.py`，用于运行实验。
+
+使用 `LightningCLI` 来简化训练过程。由于我们的 `JSA` 类中存在 `joint_model` 和 `proposal_model`，以及 `MISampler`，而后者的初始化需要调用前两个模型，因此我们需要使用 `hydra.utils.instantiate` 来实例化这些组件。
+
+```python
 
 def main():
     LightningCLI(
-        save_config_overwrite=True,
         run=True,
     )
         
@@ -374,30 +382,19 @@ if __name__ == "__main__":
 
 ```yaml
 model:
-    class_path: src.models.jsa.JSA
-    init_args:
-        cfg:
-            joint_model:
-                _target_: src.models.components.joint_model.JointModel
-                hidden_dim: 256
-                num_layers: 4
-
-            proposal_model:
-                _target_: src.models.components.proposal_model.ProposalModel
-                hidden_dim: 256
-                num_layers: 4
-
-            sampler:
-                _target_: src.samplers.misampler.MISampler
-                dataset_size: 60000
-                use_cache: true
-
-            optimizer:
-                lr: 1e-3
-
-data:
-    class_path: src.data.mnist.JsaDataModule
-    init_args:
-        batch_size: 64
-        num_workers: 4
+  class_path: src.models.jsa.JSA
+  init_args:
+    joint_model:
+      _target_: src.models.components.joint_model.JointModelBernoulliGaussian
+      latent_dim: 200
+      layers: [200, 200]
+      output_dim: 784
+      activation: leakyrelu
+      final_activation: tanh
+    proposal_model:
+      _target_: src.models.components.proposal_model.ProposalModelBernoulli
+      input_dim: 784
+      latent_dim: 200
+      layers: [200, 200]
+      activation: leakyrelu
 ```

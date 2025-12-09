@@ -1,8 +1,8 @@
 # src/base/base_sampler.py
 from abc import ABC, abstractmethod
-from torch.nn import Module
 
-class BaseSampler(ABC, Module):
+
+class BaseSampler(ABC):
     """Base sampler for JSA framework"""
 
     @abstractmethod

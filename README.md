@@ -39,10 +39,19 @@ PYTHONPATH=. python scripts/run_mnist.py fit \
 
 ```
 
+Test:
+
+```bash
+PYTHONPATH=. python scripts/run_mnist.py test \
+            --config ./configs/categorical_prior_continuous_mnist.yaml \
+            --ckpt_path ./egs/continuous_mnist/categorical_prior/version_0/checkpoints/best-checkpoint.ckpt
+
+```
+
 查看 TensorBoard 日志：
 
 ``` bash
-tensorboard --logdir=egs/continuous_mnist/categorical_prior/version_20 --port=6034
+tensorboard --logdir=egs/continuous_mnist/categorical_prior/version_0 --port=6006
 ```
 
 ## Future development

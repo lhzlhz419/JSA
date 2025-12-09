@@ -7,13 +7,15 @@ import math
 import numpy as np
 
 # 加载模型
-exp_dir = "egs/continuous_mnist/categorical_prior/version_8"
+exp_dir = "egs/continuous_mnist/categorical_prior/version_10"
 config_path = f"{exp_dir}/config.yaml"
 checkpoint_path = f"{exp_dir}/checkpoints/best-checkpoint.ckpt"
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 model = JSA.load_model(
     config_path=config_path, checkpoint_path=checkpoint_path, device=device
 )
+# ckpt = torch.load(checkpoint_path, map_location=device)
+
 
 # 准备测试数据
 test_dataset = MNISTDataset(root="./data", train=False)

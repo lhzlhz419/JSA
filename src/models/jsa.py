@@ -53,7 +53,7 @@ class JSA(LightningModule):
             h = self.proposal_model.sample_latent(
                 x, num_samples=1
             )  # [B, latent_dim, 1]
-            h = h.squeeze()
+            h = h.squeeze(-1)  # [B, latent_dim]
         x_hat = self.joint_model.sample(h=h)
         return x_hat
 
@@ -69,7 +69,8 @@ class JSA(LightningModule):
         return model.eval()
 
     def setup(self, stage=None):
-        pass
+        device = self.device
+        self.sampler.to(device)
        
 
     def configure_optimizers(self):
@@ -173,7 +174,7 @@ class JSA(LightningModule):
 
         # Calculate indices
         indices = torch.matmul(h.float(), weights)  # [B]
-        indices = indices.long()
+        indices = indices.long().squeeze(-1)  # [B]
         self.codebook_counter.index_add_(0, indices, torch.ones_like(indices, dtype=torch.int32))
 
     def on_test_epoch_end(self):
@@ -206,19 +207,19 @@ class JSA(LightningModule):
         plt.close()
         
     
-    def state_dict(self):
-        state = super().state_dict()
-        # include sampler state
-        sampler_state = self.sampler.state_dict()
-        state["sampler_state"] = sampler_state
-        return state
+    # def state_dict(self):
+    #     state = super().state_dict()
+    #     # include sampler state
+    #     sampler_state = self.sampler.state_dict()
+    #     state["sampler_state"] = sampler_state
+    #     return state
 
-    def load_state_dict(self, state_dict, strict=True):
-        # load sampler state
-        if "sampler_state" in state_dict:
-            sampler_state = state_dict.pop("sampler_state")
-            self.sampler.load_state_dict(sampler_state)
-        super().load_state_dict(state_dict, strict=strict)
+    # def load_state_dict(self, state_dict, strict=True):
+    #     # load sampler state
+    #     if "sampler_state" in state_dict:
+    #         sampler_state = state_dict.pop("sampler_state")
+    #         self.sampler.load_state_dict(sampler_state)
+    #     super().load_state_dict(state_dict, strict=strict)
 
     def on_train_epoch_start(self):
         if self.current_epoch >= self.cache_start_epoch:
@@ -240,7 +241,7 @@ class JSA(LightningModule):
 
     def on_load_checkpoint(self, checkpoint: dict):
         # Load sampler cache from checkpoint if present
-        if "sampler_state" in checkpoint and getattr(self.sampler, "use_cache", False):
+        if getattr(self.sampler, "use_cache", False):
             self.sampler.load_state_dict(checkpoint["sampler_state"])
             # after load, ensure sampler cache is on correct device
             self.sampler.to(self.device)

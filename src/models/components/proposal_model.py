@@ -145,6 +145,7 @@ class ProposalModelCategorical(BaseProposalModel):
 
         Returns:
             h_samples: Tensor of shape [B, num_latent_vars, num_samples] containing sampled latent variable indices.
+                dtype=torch.float
 
         here, each latent variable is represented as an integer index corresponding to the sampled category.
 
@@ -167,7 +168,7 @@ class ProposalModelCategorical(BaseProposalModel):
             h_samples_list, dim=1
         )  # [B, num_latent_vars, num_samples], each entry is index of category
 
-        return h_samples  # [B, total_num_categories, num_samples]
+        return h_samples.to(torch.float)  # [B, total_num_categories, num_samples]
 
     # def encode_latent(self, h, encoding_method="one_hot"):
     #     """Encode the latent variable indices into one-hot or sinusoidal encoding.

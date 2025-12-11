@@ -65,6 +65,7 @@ trainer:
         save_top_k: -1 # save all checkpoints
         filename: last-checkpoint
         every_n_epochs: 1
+        dirpath: ./egs/continuous_mnist/categorical_prior/version_3/checkpoints
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
         logging_interval: step

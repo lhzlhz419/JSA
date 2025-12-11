@@ -7,7 +7,7 @@ import torch.distributed as dist
 
 from src.samplers.misampler import MISampler
 from src.base.base_jsa_modules import BaseJointModel, BaseProposalModel
-from utils.codebook_utils import (
+from src.utils.codebook_utils import (
     encode_multidim_to_index,
     decode_index_to_multidim,
     compute_category_weights,
@@ -115,7 +115,7 @@ class JSA(LightningModule):
             self.num_categories = self.proposal_model._num_categories
             self.codebook_size = math.prod(self.num_categories)
             self.codebook_counter = torch.zeros(
-                self.codebook_size, dtype=torch.int32, device=self.device
+                self.codebook_size, dtype=torch.long, device=self.device
             )
 
     def validation_step(self, batch, batch_idx):
@@ -130,24 +130,14 @@ class JSA(LightningModule):
 
         if self.log_codebook_utilization_valid:
             # Update codebook counter
-            h = self.proposal_model.sample_latent(x, num_samples=1, encoded=False)
+            h = self.proposal_model.encode(x)
             # Calculate 1D indices from multi-dimensional categorical latent variables
-            weights = torch.tensor(
-                [
-                    math.prod(self.num_categories[i + 1 :])
-                    for i in range(self.num_latent_vars)
-                ],
-                device=self.device,
-                dtype=torch.float32,
-            )
-            # Calculate indices
-            indices = torch.matmul(h.float(), weights)  # [B]
-            indices = indices.long().squeeze(-1)  # [B]
+            indices = encode_multidim_to_index(h, self.num_categories)  # [B]
             self.codebook_counter.index_add_(
-                0, indices, torch.ones_like(indices, dtype=torch.int32)
+                0, indices, torch.ones_like(indices, dtype=torch.long)
             )
 
-        return {"valid_img": x[:16]}
+        return {"valid_img": x[:25]}
 
     def on_validation_epoch_end(self):
         # Show some reconstruction results
@@ -155,12 +145,12 @@ class JSA(LightningModule):
         x_hat = self.forward(x)  # [16, D]
 
         # show original images
-        grid_orig = torchvision.utils.make_grid(x.view(-1, 1, 28, 28), nrow=4)
+        grid_orig = torchvision.utils.make_grid(x.view(-1, 1, 28, 28), nrow=5)
         self.logger.experiment.add_image(
             "valid/original_images", grid_orig, self.current_epoch
         )
         # show reconstructed images
-        grid_recon = torchvision.utils.make_grid(x_hat.view(-1, 1, 28, 28), nrow=4)
+        grid_recon = torchvision.utils.make_grid(x_hat.view(-1, 1, 28, 28), nrow=5)
         self.logger.experiment.add_image(
             "valid/reconstructed_images", grid_recon, self.current_epoch
         )
@@ -183,28 +173,20 @@ class JSA(LightningModule):
             )
 
             # Plot codebook usage distribution
-            codebook_counter_cpu = self.codebook_counter.cpu().numpy()
-            codebook_counter_cpu = np.sort(codebook_counter_cpu)[::-1]
-            plt.figure(figsize=(12, 6))
-            plt.bar(range(self.codebook_size), codebook_counter_cpu, width=1.0)
-            plt.xlabel("Codeword Index")
-            plt.ylabel("Usage Count")
-            plt.text(
-                self.codebook_size * 0.7,
-                max(codebook_counter_cpu) * 0.9,
-                f"Used codewords: {used_codewords}/{self.codebook_size}\nUtilization rate: {utilization_rate:.4f}%",
-                fontsize=12,
-                bbox=dict(facecolor="white", alpha=0.5),
+            fig_dict = plot_codebook_usage_distribution(
+                codebook_counter=self.codebook_counter.cpu().numpy(),
+                codebook_size=self.codebook_size,
+                used_codewords=used_codewords,
+                utilization_rate=utilization_rate,
+                tag_prefix="valid",
+                save_to_disk=False,
             )
-
-            plt.title("Codebook Usage Distribution")
-            plt.tight_layout()
-            self.logger.experiment.add_figure(
-                "valid/codebook_usage_distribution",
-                plt.gcf(),
-                self.current_epoch,
-            )
-            plt.close()
+            for tag, fig in fig_dict.items():
+                self.logger.experiment.add_figure(
+                    tag,
+                    fig,
+                    self.current_epoch,
+                )
 
             # Reset codebook counter for next epoch
             self.codebook_counter.zero_()
@@ -230,11 +212,11 @@ class JSA(LightningModule):
         self.num_categories = self.proposal_model._num_categories
         self.codebook_size = math.prod(self.num_categories)
         self.codebook_counter = torch.zeros(
-            self.codebook_size, dtype=torch.int32, device=self.device
+            self.codebook_size, dtype=torch.long, device=self.device
         )
         self.codebook_multi_dim_indices = torch.zeros(
             (self.codebook_size, self.num_latent_vars),
-            dtype=torch.int32,
+            dtype=torch.long,
             device=self.device,
         )
 
@@ -254,7 +236,7 @@ class JSA(LightningModule):
         indices = encode_multidim_to_index(h, self.num_categories)  # [B]
         
         self.codebook_counter.index_add_(
-            0, indices, torch.ones_like(indices, dtype=torch.int32)
+            0, indices, torch.ones_like(indices, dtype=torch.long)
         )
         self.codebook_multi_dim_indices[indices] = h.long()
 

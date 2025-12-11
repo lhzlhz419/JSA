@@ -27,31 +27,37 @@ pip install -r requirements.txt
 训练指令：
 
 ```bash
-PYTHONPATH=. python scripts/run_mnist.py fit --config ./configs/categorical_prior_continuous_mnist.yaml
+python scripts/run_mnist.py fit \
+    --config ./configs/categorical_prior_continuous_mnist.yaml \
 ```
 
 从 `checkpoints` 恢复训练指令：
 
 ```bash
-PYTHONPATH=. python scripts/run_mnist.py fit \
-            --config ./configs/bernoulli_prior_binary_mnist.yaml \
-            --ckpt_path ./egs/bernoulli_mnist/binary_mnist/version_4/checkpoints/best-checkpoint.ckpt
+python scripts/run_mnist.py fit \
+    --config ./configs/bernoulli_prior_binary_mnist.yaml \
+    --ckpt_path ./egs/bernoulli_mnist/binary_mnist/version_4/checkpoints/best-checkpoint.ckpt 
+            
 
 ```
 
 Test:
 
 ```bash
-PYTHONPATH=. python scripts/run_mnist.py test \
-            --config ./configs/categorical_prior_continuous_mnist.yaml \
-            --ckpt_path ./egs/continuous_mnist/categorical_prior/version_0/checkpoints/best-checkpoint.ckpt
+python scripts/run_mnist.py test \
+    --config ./configs/categorical_prior_continuous_mnist.yaml \
+    --ckpt_path ./egs/continuous_mnist/categorical_prior/version_3/checkpoints/best-checkpoint.ckpt \
+    --trainer.devices=[0] \
+    --trainer.strategy=auto \
+           
+            
 
 ```
 
 查看 TensorBoard 日志：
 
 ``` bash
-tensorboard --logdir=egs/continuous_mnist/categorical_prior/version_4 --port=6006
+tensorboard --logdir=egs/continuous_mnist/categorical_prior/version_7 --port=6006
 ```
 
 ## Future development

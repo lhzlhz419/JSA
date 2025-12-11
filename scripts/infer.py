@@ -9,7 +9,7 @@ import os
 import logging
 import shutil
 
-from utils.codebook_utils import (
+from src.utils.codebook_utils import (
     encode_multidim_to_index,
     decode_index_to_multidim,
     plot_codebook_usage_distribution,

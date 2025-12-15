@@ -637,6 +637,8 @@ class NLayerDiscriminator(nn.Module):
 
 最终定义一个总的损失函数，包含重建损失，GAN 损失，以及 VQ-VAE 的向量量化损失。
 
+其中还有一个 perceptual loss，使用 LPIPS (Learned Perceptual Image Patch Similarity) 作为感知损失。预训练好一个模型，将输入图像和重建图像分别通过该模型，计算它们在特征空间的差异。（这在语音中就是 feature matching loss，distances between the lth feature maps of the kth subdiscriminator.）
+
 ```python
 class VQLPIPSWithDiscriminator(nn.Module):
     def __init__(

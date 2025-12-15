@@ -44,103 +44,98 @@ class JointModelBernoulliBernoulli(BaseJointModel):
         return self._latent_dim
 
     def log_prior_prob(self, h):
-        """Compute log p(h)
+        """Compute log p(h)"""
+        # For Bernoulli latent variables with uniform prior
+        return h.size(1) * torch.log(torch.tensor(0.5, device=h.device))
+
+    def forward(self, h):
+        """Compute p(x|h) parameters (probabilities)
 
         Args:
-            h: latent variables, shape [B, num_latent_vars, num_samples]
+            h: latent variables, shape [B, num_latent_vars] or [B, num_latent_vars, num_samples]
 
         Returns:
-            log p(h): shape []
-        Assuming uniform prior over Bernoulli latent variables
+            probs_x: shape [B, output_dim, num_samples]
         """
-        # For Bernoulli latent variables with uniform prior,
-        # log p(h) = num_latent_vars * log(0.5)
-        return h.size(1) * torch.log(torch.tensor(0.5, device=h.device))  # shape []
+        if h.dim() == 2:  # [B, num_latent_vars]
+            h = h.unsqueeze(-1)  # [B, num_latent_vars, 1]
 
-    def log_joint_prob(self, x, h):
-        """Must compute log p(x, h) = log p(h) + log p(x|h)
-
-        Args:
-            x: observed data, shape [B, output_dim]
-            h: latent variables, shape [B, num_latent_vars, num_samples]
-
-        Returns:
-            log p(x, h): shape [B, num_samples]
-
-        """
-        # Prior p(h)
-        log_p_h = self.log_prior_prob(h)  # shape []
-
-        # Likelihood p(x|h)
-        # We assume independent Bernoulli distribution for each pixel
         B, num_latent_vars, num_samples = h.size()
+
+        # Reshape h for MLP: [B, num_latent_vars, num_samples] -> [B, num_samples, num_latent_vars]
         h_reshaped = h.transpose(1, 2).reshape(
             -1, num_latent_vars
         )  # [B * num_samples, num_latent_vars]
+
         logits_x = self.net(h_reshaped)  # [B * num_samples, output_dim]
-        logits_x = logits_x.view(B, num_samples, -1)  # [B, num_samples, output_dim]
-        x = x.unsqueeze(1)  # [B, 1, output_dim]
-        log_p_x_given_h = -torch.nn.functional.binary_cross_entropy_with_logits(
-            logits_x, x, reduction="none"
+        probs_x = torch.sigmoid(logits_x)  # [B * num_samples, output_dim]
+
+        probs_x = probs_x.view(
+            B, num_samples, self.output_dim
+        )  # [B, num_samples, output_dim]
+
+        return probs_x.transpose(1, 2)  # [B, output_dim, num_samples]
+
+    def log_joint_prob(self, x, h):
+        """Must compute log p(x, h) = log p(h) + log p(x|h)"""
+        # Prior p(h)
+        log_p_h = self.log_prior_prob(h)
+
+        # Likelihood p(x|h)
+        probs_x = self.forward(h)  # [B, output_dim, num_samples]
+        x = x.unsqueeze(-1)  # [B, output_dim, 1]
+
+        # Bernoulli Log Prob
+        # We use binary_cross_entropy (which is -log_prob) so we negate it
+        # Note: x must be broadcastable to probs_x
+        log_p_x_given_h = -nn.functional.binary_cross_entropy(
+            probs_x, x.expand_as(probs_x), reduction="none"
         ).sum(
-            dim=2
-        )  # sum over dimensions, shape [B, num_samples]
-        return log_p_h + log_p_x_given_h  # log p(x, h), shape [B, num_samples]
+            dim=1
+        )  # Sum over output_dim, shape [B, num_samples]
+
+        return log_p_h + log_p_x_given_h
+
+    def get_loss(self, x, h):
+        """Compute negative log joint probability as loss (ignoring prior in loss calculation as per template)"""
+        probs_x = self.forward(h)  # [B, output_dim, num_samples]
+        x = x.unsqueeze(-1)  # [B, output_dim, 1]
+
+        # Using BCE loss as negative log likelihood
+        log_p_x_given_h = -nn.functional.binary_cross_entropy(
+            probs_x, x.expand_as(probs_x), reduction="none"
+        ).sum(
+            dim=1
+        )  # shape [B, num_samples]
+
+        log_joint = log_p_x_given_h.mean(dim=1)  # average over samples, shape [B]
+        return -log_joint.mean()
 
     def sample(self, h=None, num_samples=1):
-        """Sample x ~ p(x|h)
-
-        Args:
-            h: latent variables, shape [B, num_latent_vars]
-            num_samples: number of samples to generate
-
-        Returns:
-            x_sample: sampled observed data, shape [B, output_dim, num_samples]
-        """
-
+        """Sample x ~ p(x|h)"""
         if h is None:
             h = torch.bernoulli(0.5 * torch.ones((1, self.latent_dim))).to(
                 next(self.parameters()).device
             )  # shape [1, num_latent_vars]
+            # Expand h to generate num_samples if needed, though forward handles expansion
+            # if h is [1, num_latent_vars], forward returns [1, output_dim, 1]
+            # To get num_samples distinct samples from one h, we rely on bernoulli sampling below
 
-        logits_x = self.net(h)  # [B, output_dim]
-        probs_x = torch.sigmoid(logits_x)  # [B, output_dim]
+        probs_x = self.forward(
+            h
+        )  # [B, output_dim, num_samples] (if h had samples) or [B, output_dim, 1]
 
-        # Generate samples
-        x_samples = torch.bernoulli(
-            probs_x.unsqueeze(-1).expand(
-                -1, -1, num_samples
-            )  # [B, output_dim, num_samples]
-        )
-        return x_samples # [B, output_dim, num_samples]
-    
+        if num_samples > 1 and probs_x.shape[2] == 1:
+            probs_x = probs_x.expand(-1, -1, num_samples)
+
+        x_samples = torch.bernoulli(probs_x)  # [B, output_dim, num_samples]
+        return x_samples
+
     def decode(self, h):
-        """Decode x ~ p(x|h)
-
-        Args:
-            h: latent variables, shape [B, num_latent_vars]
-
-        Returns:
-            x_sample: sampled observed data, shape [B, output_dim]
-        """
-
-        logits_x = self.net(h)  # [B, output_dim]
-        probs_x = torch.sigmoid(logits_x)  # [B, output_dim]
+        """Decode x ~ p(x|h)"""
+        probs_x = self.forward(h).squeeze(-1)  # [B, output_dim]
         x = (probs_x > 0.5).float()
-        return x  # [B, output_dim]
-
-    def forward(self, x, h):
-        """Compute negative log joint probability as loss
-
-        Args:
-            x: observed data
-            h: latent variables
-
-        Returns:
-            loss: negative log joint probability
-        """
-        log_joint = self.log_joint_prob(x, h)  # [B, num_samples]
-        return -log_joint.mean()
+        return x
 
 
 class JointModelBernoulliGaussian(BaseJointModel):
@@ -187,113 +182,85 @@ class JointModelBernoulliGaussian(BaseJointModel):
             return torch.clamp(x, 0.0, 1.0)  # clamp to [0, 1]
 
     def log_prior_prob(self, h):
-        """
-        Compute log p(h)
-        Assuming uniform prior over Bernoulli latent variables
-        """
+        """Compute log p(h)"""
         return h.size(1) * torch.log(torch.tensor(0.5, device=h.device))
 
-    def log_joint_prob(self, x, h):
-        """Must compute log p(x, h) = log p(h) + log p(x|h)
+    def forward(self, h):
+        """Compute p(x|h) parameters (mean)
 
         Args:
-            x: observed data shape [B, output_dim]
-            h: latent variables shape [B, num_latent_vars, num_samples]
-            
-        Returns:
-            log p(x, h): shape [B, num_samples]
-            
+            h: latent variables, shape [B, num_latent_vars] or [B, num_latent_vars, num_samples]
 
+        Returns:
+            mean_x: shape [B, output_dim, num_samples]
         """
+        if h.dim() == 2:  # [B, num_latent_vars]
+            h = h.unsqueeze(-1)  # [B, num_latent_vars, 1]
+
+        B, num_latent_vars, num_samples = h.size()
+
+        # Reshape h: [B, num_latent_vars, num_samples] -> [B, num_samples, num_latent_vars]
+        h_reshaped = h.transpose(1, 2).reshape(
+            -1, num_latent_vars
+        )  # [B * num_samples, num_latent_vars]
+
+        mean_x = self.net(h_reshaped)  # [B * num_samples, output_dim]
+        mean_x = self.post_process(mean_x)
+
+        mean_x = mean_x.view(
+            B, num_samples, self.output_dim
+        )  # [B, num_samples, output_dim]
+
+        return mean_x.transpose(1, 2)  # [B, output_dim, num_samples]
+
+    def log_joint_prob(self, x, h):
+        """Must compute log p(x, h) = log p(h) + log p(x|h)"""
         # Prior p(h)
         log_p_h = self.log_prior_prob(h)
 
         # Likelihood p(x|h)
-        # We assume independent Gaussian distribution for each pixel with fixed variance (e.g., 1.0)
-        B, num_latent_vars, num_samples = h.size()
-        h_reshaped = h.transpose(1, 2).reshape(
-            -1, num_latent_vars
-        )  # [B * num_samples, num_latent_vars]
-        
-        mean_x = self.net(h_reshaped)  # [B * num_samples, output_dim]
-        mean_x = self.post_process(mean_x)  # ensure mean is in [0, 1]
-        mean_x = mean_x.view(B, num_samples, -1)  # [B, num_samples, output_dim]
-        x = x.unsqueeze(1)  # [B, 1, output_dim]
+        mean_x = self.forward(h)  # [B, output_dim, num_samples]
+        x = x.unsqueeze(-1)  # [B, output_dim, 1]
+
         gaussian_dist = torch.distributions.Normal(loc=mean_x, scale=self.SIGMA)
         log_p_x_given_h = gaussian_dist.log_prob(x).sum(
-            dim=2
-        )  # sum over dimensions, shape [B, num_samples]
-        return log_p_h + log_p_x_given_h  # log p(x, h), shape [B, num_samples]
+            dim=1
+        )  # Sum over output_dim, shape [B, num_samples]
 
-    def sample(self, h=None, num_samples=1):
-        """Sample x ~ p(x|h)
+        return log_p_h + log_p_x_given_h
 
-        Args:
-            h: latent variables shape [B, num_latent_vars]
-            num_samples: number of samples to generate
-
-        Returns:
-            x_sample: sampled observed data, shape [B, output_dim, num_samples]
-        """
-
-        if h is None:
-            h = torch.bernoulli(0.5 * torch.ones((1, self.latent_dim))).to(
-                next(self.parameters()).device
-            ) # shape [1, num_latent_vars]
-        mean_x = self.net(h)  # [B, output_dim]
-        mean_x = self.post_process(mean_x)  # ensure mean is in [0, 1]
-
-        gaussian_dist = torch.distributions.Normal(loc=mean_x, scale=self.SIGMA)
-        x_samples = gaussian_dist.sample((num_samples,)) # [num_samples, B, output_dim]
-        x_samples = torch.clamp(x_samples, 0.0, 1.0).permute(1, 2, 0)  # [B, output_dim, num_samples]
-
-        return x_samples # [B, output_dim, num_samples]
-    
-    def decode(self, h):
-        """Decode x ~ p(x|h)
-
-        Args:
-            h: latent variables, shape [B, num_latent_vars]
-
-        Returns:
-            x_sample: sampled observed data, shape [B, output_dim]
-        """
-
-        mean_x = self.net(h)  # [B, output_dim]
-        mean_x = self.post_process(mean_x)  # ensure mean is in [0, 1]
-
-        return mean_x  # [B, output_dim]
-
-    def forward(self, x, h):
-        """Compute negative log joint probability as loss
-
-        Args:
-            x: observed data, shape [B, output_dim]
-            h: latent variables, shape [B, num_latent_vars, num_samples]
-
-        Returns:
-            loss: negative log joint probability
-        """
-        # Prior p(h)
-        log_p_h = self.log_prior_prob(h)
-
-        # Likelihood p(x|h)
-        # We assume independent Gaussian distribution for each pixel with fixed variance (e.g., 1.0)
-        B, num_latent_vars, num_samples = h.size()
-        h_reshaped = h.transpose(1, 2).reshape(
-            -1, num_latent_vars
-        )  # [B * num_samples, num_latent_vars]
-        
-        mean_x = self.net(h_reshaped)  # [B * num_samples, output_dim]
-        mean_x = self.post_process(mean_x)  # ensure mean is in [0, 1]
-        mean_x = mean_x.view(B, num_samples, -1)  # [B, num_samples, output_dim]
-        x = x.unsqueeze(1)  # [B, 1, output_dim]
+    def get_loss(self, x, h):
+        """Compute negative log joint probability as loss"""
+        mean_x = self.forward(h)  # [B, output_dim, num_samples]
+        x = x.unsqueeze(-1)  # [B, output_dim, 1]
 
         # Using MSE loss as negative log likelihood
         mse_loss = nn.MSELoss(reduction="none")
-        log_p_x_given_h = -mse_loss(mean_x, x).sum(dim=2)  # shape [B, num_samples]
-        log_joint = log_p_h + log_p_x_given_h
-        return -log_joint.mean() # negative log joint probability
+        log_p_x_given_h = -mse_loss(mean_x, x).sum(dim=1)  # shape [B, num_samples]
+
+        log_joint = log_p_x_given_h.mean(dim=1)  # average over samples, shape [B]
+        return -log_joint.mean()
+
+    def sample(self, h=None, num_samples=1):
+        """Sample x ~ p(x|h)"""
+        if h is None:
+            h = torch.bernoulli(0.5 * torch.ones((1, self.latent_dim))).to(
+                next(self.parameters()).device
+            )  # shape [1, num_latent_vars]
+
+        mean_x = self.forward(h)  # [B, output_dim, 1] (if h has no samples)
+
+        if num_samples > 1 and mean_x.shape[2] == 1:
+            mean_x = mean_x.expand(-1, -1, num_samples)
+
+        gaussian_dist = torch.distributions.Normal(loc=mean_x, scale=self.SIGMA)
+        x_samples = gaussian_dist.sample()  # [B, output_dim, num_samples]
+        return torch.clamp(x_samples, 0.0, 1.0)
+
+    def decode(self, h):
+        """Decode x ~ p(x|h)"""
+        mean_x = self.forward(h).squeeze(-1)  # [B, output_dim]
+        return mean_x  # return mean as decoded output
 
 
 class JointModelCategoricalGaussian(BaseJointModel):
@@ -340,15 +307,14 @@ class JointModelCategoricalGaussian(BaseJointModel):
                 len(embedding_dims) == num_latent_vars
             ), "embedding_dims must be an integer or a list of length num_latent_vars"
             self.embedding_dims = list(embedding_dims)
-            
+
         self.embeddings = nn.ModuleList(
             [
                 nn.Embedding(num_embeddings=K, embedding_dim=emb_dim)
                 for K, emb_dim in zip(self._num_categories, self.embedding_dims)
             ]
         )
-        
-        
+
         self._latent_dim = sum(self.embedding_dims)
         self.net = build_mlp(
             input_dim=self._latent_dim,
@@ -398,32 +364,13 @@ class JointModelCategoricalGaussian(BaseJointModel):
         # Likelihood p(x|h)
         # We assume independent Gaussian distribution for each pixel with fixed variance (e.g., 1.0)
         # Shape of h: [B, num_latent_vars, num_samples]
-        h_embedded = [
-            embedding(h[:, i, :].long()) # [B, num_samples] -> [B, num_samples, embedding_dim]
-            for i, embedding in enumerate(self.embeddings)
-        ]
-        h_densed = torch.cat(h_embedded, dim=-1)  # [B, num_samples, latent_dim]
-        B, num_samples, _ = h_densed.size()
-        
-        h_reshaped = h_densed.reshape(
-            -1, self.latent_dim
-        )  # [B * num_samples, latent_dim]
+        mean_x = self.forward(h)  # [B, output_dim, num_samples]
+        x = x.unsqueeze(-1)  # [B, output_dim, 1]
 
-        mean_x = self.net(h_reshaped)  # [B * num_samples, output_dim]
-        mean_x = self.post_process(mean_x)  # ensure mean is in [0, 1]
-        mean_x = mean_x.view(B, num_samples, self.output_dim)  # [B, num_samples, output_dim]
-
-        # gaussian_dist = torch.distributions.Normal(loc=mean_x, scale=self.SIGMA)
-        # log_p_x_given_h = gaussian_dist.log_prob(x.unsqueeze(1)).sum(
-        #     dim=2
-        # )  # sum over dimensions, shape [B, num_samples]
-        
-        # We only need to calculate: -0.5 * sum((x - mean_x)^2) / sigma^2 - 0.5 * log(2 * pi * sigma^2)
-        # since sigma is fixed, we can ignore the constant term - 0.5 * log(2 * pi * sigma^2)
-        # Thus, we can use MSE loss as negative log likelihood
-        x = x.unsqueeze(1)  # [B, 1, output_dim]
-        mse_loss = nn.MSELoss(reduction="none")
-        log_p_x_given_h = -mse_loss(mean_x, x).sum(dim=2)/ (2 * self.SIGMA ** 2)  # shape [B, num_samples]
+        gaussian_dist = torch.distributions.Normal(loc=mean_x, scale=self.SIGMA)
+        log_p_x_given_h = gaussian_dist.log_prob(x).sum(
+            dim=1
+        )  # sum over dimensions, shape [B, num_samples]
 
         return log_p_h + log_p_x_given_h  # log p(x, h)
 
@@ -446,20 +393,14 @@ class JointModelCategoricalGaussian(BaseJointModel):
             ]
             h = torch.cat(h_indices, dim=-1)  # shape [1, num_latent_vars]
 
-        h_embedded = [
-            embedding(h[:, i].long())  # [B, num_latent_vars] -> [B, embedding_dim]
-            for i, embedding in enumerate(self.embeddings)
-        ]
-        h_densed = torch.cat(h_embedded, dim=-1)  # [B, latent_dim]
-        
-        mean_x = self.net(h_densed)  # [B, output_dim]
-        mean_x = self.post_process(mean_x)  # ensure mean is in [0, 1]
-
+        mean_x = self.forward(h).squeeze(-1)  # [B, output_dim]
         gaussian_dist = torch.distributions.Normal(loc=mean_x, scale=self.SIGMA)
-        x_samples = gaussian_dist.sample((num_samples,))
-        x_samples = torch.clamp(x_samples, 0.0, 1.0).permute(1, 2, 0)  # [B, output_dim, num_samples]
+        x_samples = gaussian_dist.sample((num_samples,))  # [num_samples, B, output_dim]
+        x_samples = torch.clamp(x_samples, 0.0, 1.0).permute(
+            1, 2, 0
+        )  # [B, output_dim, num_samples]
         return x_samples  # [B, output_dim, num_samples]
-    
+
     def decode(self, h):
         """Decode x ~ p(x|h)
 
@@ -470,49 +411,58 @@ class JointModelCategoricalGaussian(BaseJointModel):
             x_sample: sampled observed data, shape [B, output_dim]
         """
 
-        h_embedded = [
-            embedding(h[:, i].long())  # [B, num_latent_vars] -> [B, embedding_dim]
-            for i, embedding in enumerate(self.embeddings)
-        ]
-        h_densed = torch.cat(h_embedded, dim=-1)  # [B, latent_dim]
-        
-        mean_x = self.net(h_densed)  # [B, output_dim]
-        mean_x = self.post_process(mean_x)  # ensure mean is in [0, 1]
-
+        mean_x = self.forward(h).squeeze(-1)  # [B, output_dim]
         return mean_x  # [B, output_dim]
 
-    def forward(self, x, h):
+    def get_loss(self, x, h):
         """Compute negative log joint probability as loss
 
         Args:
-            x: observed data
-            h: latent variables
+            x: observed data, shape [B, output_dim]
+            h: latent variables, shape [B, num_latent_vars, num_samples]
 
         Returns:
             loss: negative log joint probability
         """
-        # Prior p(h)
-        log_p_h = self.log_prior_prob(h)
+
+        mean_x = self.forward(h)  # [B, output_dim, num_samples]
+        x = x.unsqueeze(-1)  # [B, output_dim, 1]
+        # Using MSE loss as negative log likelihood
+        mse_loss = nn.MSELoss(reduction="none")
+        log_p_x_given_h = -mse_loss(mean_x, x).sum(dim=1)  # shape [B, num_samples]
+        log_joint = log_p_x_given_h.mean(dim=1)  # average over samples, shape [B]
+        return -log_joint.mean()  # negative log joint probability
+
+    def forward(self, h):
+        """Decode x ~ p(x|h)
+
+        Args:
+            h: latent variables, shape [B, num_latent_vars] or [B, num_latent_vars, num_samples]
+
+        Returns:
+            mean_x: decoded observed data, shape [B, output_dim, num_samples]
+        """
+        if h.dim() == 2:  # [B, num_latent_vars]
+            h = h.unsqueeze(-1)  # [B, num_latent_vars, 1]
 
         # Likelihood p(x|h)
         # We assume independent Gaussian distribution for each pixel with fixed variance (e.g., 1.0)
-        B, num_latent_vars, num_samples = h.size()
+        B, _, num_samples = h.size()
         h_embedded = [
-            embedding(h[:, i, :].long()) # [B, num_samples] -> [B, num_samples, embedding_dim]
+            embedding(
+                h[:, i, :].long()
+            )  # [B, num_samples] -> [B, num_samples, embedding_dim]
             for i, embedding in enumerate(self.embeddings)
         ]
         h_densed = torch.cat(h_embedded, dim=-1)  # [B, num_samples, latent_dim]
         h_reshaped = h_densed.reshape(
             -1, self.latent_dim
         )  # [B * num_samples, latent_dim]
-        
+
         mean_x = self.net(h_reshaped)  # [B * num_samples, output_dim]
         mean_x = self.post_process(mean_x)  # ensure mean is in [0, 1]
-        mean_x = mean_x.view(B, num_samples, self.output_dim)  # [B, num_samples, output_dim]
-        x = x.unsqueeze(1)  # [B, 1, output_dim]
-        # Using MSE loss as negative log likelihood
-        mse_loss = nn.MSELoss(reduction="none")
-        log_p_x_given_h = -mse_loss(mean_x, x).sum(dim=2)  # shape [B, num_samples]
-        log_p_x_given_h = log_p_x_given_h.mean(dim=1)  # average over samples, shape [B]
-        log_joint = log_p_h + log_p_x_given_h
-        return -log_joint.mean()
+        mean_x = mean_x.view(
+            B, num_samples, self.output_dim
+        )  # [B, num_samples, output_dim]
+
+        return mean_x.transpose(1, 2)  # [B, output_dim, num_samples]

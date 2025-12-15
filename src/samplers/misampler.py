@@ -91,8 +91,8 @@ class MISampler(BaseSampler):
 
     @torch.no_grad()
     def _cal_acceptance_prob(self, x, h_new, h_old):
-        """
-        Calculate acceptance probability for MIS step
+        """Calculate acceptance probability for MIS step
+
         a = p(x,h') * q(h|x) / (p(x,h) * q(h'|x))
         """
         log_p_new = self.joint_model.log_joint_prob(x, h_new)
@@ -126,6 +126,55 @@ class MISampler(BaseSampler):
         return accept_prob
 
     @torch.no_grad()
+    def _cal_acceptance_prob_faster(self, x, h_new, h_old):
+        """Calculate acceptance probability for MIS step. Only for categorical latent variables and
+        gaussian joint model.
+
+        log a = log p(x,h') + log q(h|x) - log p(x,h) - log q(h'|x)
+
+        log p(x,h') - log p(x,h) = log N(x; mu(h'), sigma) - log N(x; mu(h), sigma)
+        = 1/sigma^2 (mu(h') - mu(h))^T (x - 0.5 (mu(h') + mu(h)))
+
+        log q(h|x) and log q(h'|x) can be computed: (Only for one codebook categorical latent variables)
+        log q(h|x) = logit_h - logsumexp_logits
+        log q(h'|x) = logit_h' - logsumexp_logits
+        so, log q(h|x) - log q(h'|x) = logit_h - logit_h'
+
+        """
+        assert (
+            self.joint_model.__class__.__name__ == "JointModelCategoricalGaussian"
+            and self.proposal_model.__class__.__name__ == "ProposalModelCategorical"
+            and self.proposal_model.num_categories is not None
+            and len(self.proposal_model.num_categories) == 1
+        ), "This faster acceptance probability calculation only supports categorical latent variables with one codebook and gaussian joint model."
+
+        mu_h_new = self.joint_model(h_new)  # [B, input_dim, num_samples]
+        mu_h_old = self.joint_model(h_old)  # [B, input_dim, num_samples]
+
+        sigma_sq = self.joint_model.sigma**2  # scalar
+
+        x_expand = x.unsqueeze(-1)  # [B, input_dim, 1]
+        term1 = (mu_h_new - mu_h_old).permute(0, 2, 1)  # [B, num_samples, input_dim]
+        term2 = x_expand - 0.5 * (mu_h_new + mu_h_old)  # [B, input_dim, num_samples]
+        log_p_diff = (1.0 / sigma_sq) * torch.bmm(term1, term2).squeeze(
+            -1
+        )  # [B, num_samples]
+        logits = self.proposal_model.forward(x)[0]  # [B, latent_dim]
+        # get logits for h_new and h_old
+        logits_h_new = torch.gather(
+            logits, 1, h_new.squeeze(-1).long()
+        )  # [B, num_samples]
+        logits_h_old = torch.gather(
+            logits, 1, h_old.squeeze(-1).long()
+        )  # [B, num_samples]
+
+        log_q_diff = logits_h_old - logits_h_new  # [B, num_samples]
+
+        log_accept = log_p_diff + log_q_diff  # [B, num_samples]
+        accept_prob = torch.exp(torch.clamp(log_accept, max=0.0, min=-100.0))
+        return accept_prob
+
+    @torch.no_grad()
     def step(self, x, idx=None, h_old=None):
         """
         Perform single MIS step:
@@ -147,7 +196,10 @@ class MISampler(BaseSampler):
         h_new = self.proposal_model.sample_latent(x)  # [batch_size, num_latent_vars, 1]
 
         # Compute acceptance probability
-        accept_prob = self._cal_acceptance_prob(x, h_new, h_old)  # [batch_size, 1]
+        # accept_prob = self._cal_acceptance_prob(x, h_new, h_old)  # [batch_size, 1]
+        accept_prob = self._cal_acceptance_prob_faster(
+            x, h_new, h_old
+        )  # [batch_size, 1]
 
         u = torch.rand_like(accept_prob)
         accept = (u < accept_prob).float().unsqueeze(-1)  # [batch_size, 1, 1]

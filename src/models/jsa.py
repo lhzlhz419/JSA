@@ -93,13 +93,13 @@ class JSA(LightningModule):
 
         # Update joint model
         opt_joint.zero_grad()
-        loss_joint = self.joint_model(x, h)
+        loss_joint = self.joint_model.get_loss(x, h)
         self.manual_backward(loss_joint)
         opt_joint.step()
 
         # Update proposal model
         opt_proposal.zero_grad()
-        loss_proposal = self.proposal_model(h, x)
+        loss_proposal = self.proposal_model.get_loss(h, x)
         self.manual_backward(loss_proposal)
         opt_proposal.step()
 

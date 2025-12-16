@@ -4,25 +4,32 @@ model:
   class_path: src.models.jsa.JSA
   init_args:
     joint_model:
-      _target_: src.models.components.joint_model.JointModelCategoricalGaussian
-      num_categories: [4096]
-      num_latent_vars: 1
-      embedding_dims: [12]
-      net:
-        class_path: src.models.components.networks.MLPNetwork
-        init_args:
-          layers: [100, 100]
-          input_dim: 12 # should be equal to sum of embedding_dims
-          output_dim: 784
-          activation: leakyrelu
-          final_activation: tanh
+      class_path: src.models.components.joint_model.JointModelCategoricalGaussian
+      init_args:
+        num_categories: [4096]
+        num_latent_vars: 1
+        embedding_dims: [12]
+        net:
+          class_path: src.models.components.networks.MLPNetwork
+          init_args:
+            layers: [200, 200]
+            input_dim: 12 # should be equal to sum of embedding_dims
+            output_dim: 784
+            activation: leakyrelu
+            final_activation: tanh
     proposal_model:
-      _target_: src.models.components.proposal_model.ProposalModelCategorical
-      input_dim: 784
-      num_categories: [4096]
-      num_latent_vars: 1
-      layers: [200, 200]
-      activation: leakyrelu
+      class_path: src.models.components.proposal_model.ProposalModelCategorical
+      init_args:
+        num_categories: [4096]
+        num_latent_vars: 1
+        net:
+          class_path: src.models.components.networks.MLPNetwork
+          init_args:
+            layers: [200, 200]
+            input_dim: 784
+            output_dim: 4096 # should be equal to sum of num_categories
+            activation: leakyrelu
+            final_activation: null
     sampler:
       _target_: src.samplers.misampler.MISampler
       use_cache: false # initial value, will be updated during training
@@ -31,7 +38,6 @@ model:
     lr_proposal: 3e-4
     num_mis_steps: 2
     cache_start_epoch: 600
-
 
 data:
   class_path: src.data.mnist.MNISTDataModule
@@ -48,7 +54,6 @@ trainer:
       name: categorical_prior
 
   callbacks:
-    
     # - class_path: src.utils.redirect_print_callback.RedirectPrintCallback
     #   init_args:
     #     filename: training.log
@@ -83,13 +88,9 @@ trainer:
 
   max_epochs: 1000
   accelerator: gpu
-  devices: [4,5,6,7]
+  devices: [4, 5, 6, 7]
   strategy: ddp_find_unused_parameters_true
   # strategy: auto
   precision: 32
   enable_progress_bar: true
   log_every_n_steps: 25
- 
-
-
-  

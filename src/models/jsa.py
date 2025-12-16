@@ -22,8 +22,8 @@ import matplotlib.pyplot as plt
 class JSA(LightningModule):
     def __init__(
         self,
-        joint_model,
-        proposal_model,
+        joint_model: BaseJointModel,
+        proposal_model: BaseProposalModel,
         sampler,
         lr_joint=1e-3,
         lr_proposal=1e-3,
@@ -31,8 +31,8 @@ class JSA(LightningModule):
         cache_start_epoch=0,
     ):
         super().__init__()
-        self.joint_model: BaseJointModel = instantiate(joint_model)
-        self.proposal_model: BaseProposalModel = instantiate(proposal_model)
+        self.joint_model: BaseJointModel = joint_model
+        self.proposal_model: BaseProposalModel = proposal_model
         self.sampler: MISampler = instantiate(
             sampler,
             joint_model=self.joint_model,

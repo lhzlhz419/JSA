@@ -55,7 +55,7 @@ PYTHONPATH=. python scripts/run_mnist.py test \
 查看 TensorBoard 日志：
 
 ``` bash
-tensorboard --logdir=egs/continuous_mnist/categorical_prior/version_6 --port=6006
+tensorboard --logdir=egs/continuous_mnist/categorical_prior/version_10 --port=6006
 ```
 
 ## Future development

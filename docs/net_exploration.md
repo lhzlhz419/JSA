@@ -806,6 +806,15 @@ class VQLPIPSWithDiscriminator(nn.Module):
 
 另外一个原因是，音频要求的上采样倍率比图像高很多，通常为 $256\times$ $320\times$ 等，如果使用一步插值加卷积的方式，会导致卷积层看到的局部是完全重复的信号，无法学习到有效的特征。而使用多层插值加卷积，实现上会很复杂。使用转置卷积则可以一步实现高倍率的上采样。以及，音频结构往往具有周期性，转置卷积的大 stride 相当于利用了这种周期性结构，每次复制粘贴一段波形，从而更好地保留音频的周期性特征。
 
+## Design Summary
+
+目前决定使用 VQ-GAN 的设计，一方面是更加现代的，另一方面我比较熟悉 Unet 结构。
+
+代码实现上，Encoder 和 Decoder 直接复用 Diffusion Models 中的 Unet 的 Encoder 和 Decoder 结构，只不过去掉时间步 embedding。
+上下采样模块使用 Unet 中的实现，支持池化和插值。（音频再考虑上采样用转置卷积）
+
+至于 GAN 的损失先不考虑。
+
 ---
 
 ## Appendix: Checkerboard Artifacts

@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 
 from src.base.base_jsa_modules import BaseProposalModel
-from src.utils.mlp_utils import build_mlp
 
 
 class ProposalModelBernoulli(BaseProposalModel):
@@ -18,25 +17,16 @@ class ProposalModelBernoulli(BaseProposalModel):
 
     def __init__(
         self,
-        input_dim=784,
-        layers=[512, 512],
+        net: nn.Module = None,
         num_latent_vars=256,
-        activation: str = "relu",
     ):
         super().__init__()
 
         self.num_latent_vars = num_latent_vars
         self._latent_dim = num_latent_vars
-        self.input_dim = input_dim
 
         self._categories = [2] * num_latent_vars  # for compatibility
-
-        self.net = build_mlp(
-            input_dim=input_dim,
-            layers=layers,
-            output_dim=self.latent_dim,
-            activation=activation,
-        )
+        self.net = net
 
     @property
     def latent_dim(self):
@@ -135,11 +125,9 @@ class ProposalModelCategorical(BaseProposalModel):
 
     def __init__(
         self,
-        input_dim=784,
-        layers=[512, 512],
+        net: nn.Module = None,
         num_latent_vars=10,
         num_categories=256,
-        activation: str = "relu",
     ):
         super().__init__()
 
@@ -156,13 +144,8 @@ class ProposalModelCategorical(BaseProposalModel):
             self._num_categories = list(num_categories)
 
         self.total_num_categories = sum(self._num_categories)
-
-        self.net = build_mlp(
-            input_dim=input_dim,
-            layers=layers,
-            output_dim=self.total_num_categories,
-            activation=activation,
-        )
+        self.net = net  # nn.Module that outputs logits of shape [B, total_num_categories]
+        
 
     @property
     def latent_dim(self):

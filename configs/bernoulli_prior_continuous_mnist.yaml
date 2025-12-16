@@ -4,18 +4,26 @@ model:
   class_path: src.models.jsa.JSA
   init_args:
     joint_model:
-      _target_: src.models.components.joint_model.JointModelBernoulliGaussian
-      num_latent_vars: 200
-      layers: [200, 200]
-      output_dim: 784
-      activation: leakyrelu
-      final_activation: tanh
+      class_path: src.models.components.joint_model.JointModelBernoulliGaussian
+      init_args:
+        num_latent_vars: 200
+        net:
+          class_path: src.models.components.networks.MLPNetwork
+          init_args:
+        layers: [200, 200]
+        output_dim: 784
+        activation: leakyrelu
+        final_activation: tanh
     proposal_model:
-      _target_: src.models.components.proposal_model.ProposalModelBernoulli
-      input_dim: 784
-      num_latent_vars: 200
-      layers: [200, 200]
-      activation: leakyrelu
+      class_path: src.models.components.proposal_model.ProposalModelBernoulli
+      init_args:
+        input_dim: 784
+        num_latent_vars: 200
+        net:
+          class_path: src.models.components.networks.MLPNetwork
+          init_args:
+            layers: [200, 200]
+            activation: leakyrelu
     sampler:
       _target_: src.samplers.misampler.MISampler
       use_cache: false # initial value, will be updated during training

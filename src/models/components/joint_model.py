@@ -14,30 +14,19 @@ class JointModelBernoulliBernoulli(BaseJointModel):
         - log_joint_prob(x, h)
 
     We assume Bernoulli prior for p(h) and Bernoulli likelihood for p(x|h)
-    Using MLP to model p_theta(x|h)
     """
 
     def __init__(
         self,
+        net: nn.Module,
         num_latent_vars=256,
-        layers=[512, 512],
-        output_dim=784,
-        activation: str = "relu",
-        final_activation: str = None,
     ):
         super().__init__()
 
         self._latent_dim = num_latent_vars
         self.num_latent_vars = num_latent_vars
 
-        self.output_dim = output_dim
-        self.net = build_mlp(
-            input_dim=num_latent_vars,
-            layers=layers,
-            output_dim=output_dim,
-            activation=activation,
-            final_activation=final_activation,
-        )
+        self.net = net
 
     @property
     def latent_dim(self):
@@ -67,11 +56,11 @@ class JointModelBernoulliBernoulli(BaseJointModel):
             -1, num_latent_vars
         )  # [B * num_samples, num_latent_vars]
 
-        logits_x = self.net(h_reshaped)  # [B * num_samples, output_dim]
-        probs_x = torch.sigmoid(logits_x)  # [B * num_samples, output_dim]
+        # Assume net includes Sigmoid activation and returns probabilities
+        probs_x = self.net(h_reshaped)  # [B * num_samples, output_dim]
 
         probs_x = probs_x.view(
-            B, num_samples, self.output_dim
+            B, num_samples, -1
         )  # [B, num_samples, output_dim]
 
         return probs_x.transpose(1, 2)  # [B, output_dim, num_samples]
@@ -149,37 +138,18 @@ class JointModelBernoulliGaussian(BaseJointModel):
 
     def __init__(
         self,
+        net: nn.Module,
         num_latent_vars=256,
-        layers=[512, 512],
-        output_dim=784,
-        activation: str = "relu",
-        final_activation: str = None,
     ):
         super().__init__()
 
         self._latent_dim = num_latent_vars
         self.num_latent_vars = num_latent_vars
-        self.output_dim = output_dim
-        self.net = build_mlp(
-            input_dim=num_latent_vars,
-            layers=layers,
-            output_dim=output_dim,
-            activation=activation,
-            final_activation=final_activation,
-        )
+        self.net = net
 
     @property
     def latent_dim(self):
         return self._latent_dim
-
-    def post_process(self, x):
-        """Post-process output x to be in [0, 1] range"""
-        if self.net[-1].__class__ == nn.Sigmoid:
-            return x  # already in [0, 1]
-        elif self.net[-1].__class__ == nn.Tanh:
-            return (x + 1) / 2  # scale from [-1, 1] to [0, 1]
-        else:
-            return torch.clamp(x, 0.0, 1.0)  # clamp to [0, 1]
 
     def log_prior_prob(self, h):
         """Compute log p(h)"""
@@ -204,11 +174,11 @@ class JointModelBernoulliGaussian(BaseJointModel):
             -1, num_latent_vars
         )  # [B * num_samples, num_latent_vars]
 
+        # Assume net includes appropriate activation (e.g. Sigmoid) and returns mean in [0, 1]
         mean_x = self.net(h_reshaped)  # [B * num_samples, output_dim]
-        mean_x = self.post_process(mean_x)
 
         mean_x = mean_x.view(
-            B, num_samples, self.output_dim
+            B, num_samples, -1
         )  # [B, num_samples, output_dim]
 
         return mean_x.transpose(1, 2)  # [B, output_dim, num_samples]
@@ -274,18 +244,15 @@ class JointModelCategoricalGaussian(BaseJointModel):
 
     def __init__(
         self,
+        net: nn.Module,
         num_categories,
         num_latent_vars,
         embedding_dims=None,
-        layers=[512, 512],
-        output_dim=784,
-        activation: str = "relu",
-        final_activation: str = None,
+
     ):
         super().__init__()
 
         self.num_latent_vars = num_latent_vars
-        self.output_dim = output_dim
 
         if len(num_categories) == 1 and num_latent_vars > 1:
             self._num_categories = list(num_categories) * num_latent_vars
@@ -316,26 +283,11 @@ class JointModelCategoricalGaussian(BaseJointModel):
         )
 
         self._latent_dim = sum(self.embedding_dims)
-        self.net = build_mlp(
-            input_dim=self._latent_dim,
-            layers=layers,
-            output_dim=output_dim,
-            activation=activation,
-            final_activation=final_activation,
-        )
+        self.net = net
 
     @property
     def latent_dim(self):
         return self._latent_dim
-
-    def post_process(self, x):
-        """Post-process output x to be in [0, 1] range"""
-        if self.net[-1].__class__ == nn.Sigmoid:
-            return x  # already in [0, 1]
-        elif self.net[-1].__class__ == nn.Tanh:
-            return (x + 1) / 2  # scale from [-1, 1] to [0, 1]
-        else:
-            return torch.clamp(x, 0.0, 1.0)  # clamp to [0, 1]
 
     def log_prior_prob(self, h):
         """
@@ -460,9 +412,8 @@ class JointModelCategoricalGaussian(BaseJointModel):
         )  # [B * num_samples, latent_dim]
 
         mean_x = self.net(h_reshaped)  # [B * num_samples, output_dim]
-        mean_x = self.post_process(mean_x)  # ensure mean is in [0, 1]
         mean_x = mean_x.view(
-            B, num_samples, self.output_dim
+            B, num_samples, -1
         )  # [B, num_samples, output_dim]
 
         return mean_x.transpose(1, 2)  # [B, output_dim, num_samples]

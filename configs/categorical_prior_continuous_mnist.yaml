@@ -8,10 +8,14 @@ model:
       num_categories: [4096]
       num_latent_vars: 1
       embedding_dims: [12]
-      layers: [100, 100]
-      output_dim: 784
-      activation: leakyrelu
-      final_activation: tanh
+      net:
+        class_path: src.models.components.networks.MLPNetwork
+        init_args:
+          layers: [100, 100]
+          input_dim: 12 # should be equal to sum of embedding_dims
+          output_dim: 784
+          activation: leakyrelu
+          final_activation: tanh
     proposal_model:
       _target_: src.models.components.proposal_model.ProposalModelCategorical
       input_dim: 784
